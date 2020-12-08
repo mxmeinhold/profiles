@@ -1,5 +1,9 @@
 import os
 
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
 import csh_ldap
 from flask import Flask, render_template, jsonify, request, redirect, flash
 from flask_pyoidc.flask_pyoidc import OIDCAuthentication
@@ -17,6 +21,11 @@ else:
 auth = OIDCAuthentication(app, issuer=app.config["OIDC_ISSUER"],
                           client_registration_info=app.config["OIDC_CLIENT_CONFIG"])
 
+# Sentry
+sentry_sdk.init(
+    dsn=app.config['SENTRY_DSN'],
+    integrations=[FlaskIntegration(), SqlalchemyIntegration()]
+)
 
 # LDAP
 _ldap = csh_ldap.CSHLDAP(app.config['LDAP_BIND_DN'], app.config['LDAP_BIND_PASS'])
@@ -46,7 +55,8 @@ from profiles.ldap import(ldap_update_profile,
                                         ldap_is_rtp,
                                         get_image,
                                         get_gravatar,
-                                        proxy_image)
+                                        proxy_image,
+                                        BadQueryError)
 
 
 @app.route("/", methods=["GET"])
@@ -173,3 +183,18 @@ def clear_cache(info=None):
     flash('Cache cleared!')
 
     return redirect(request.referrer, 302)
+
+
+@app.errorhandler(500)
+def handle_internal_error(e):
+    if isinstance(e.original_exception, BadQueryError):
+        return render_template("404.html", message=e.original_exception), 404
+    raise e.original_exception
+
+
+@app.route("/health")
+def health():
+    """
+    Shows an ok status if the application is up and running
+    """
+    return {"status": "ok"}
